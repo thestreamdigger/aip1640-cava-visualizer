@@ -106,7 +106,7 @@ This project is released under the GNU General Public License v3.0. See the [LIC
 
 ## Acknowledgments
 
-- [AIP1640 LED Driver Datasheet](https://www.lcsc.com/datasheet/lcsc_datasheet_AiP1640_C82650.pdf)
+- [AIP1640 datasheet](https://www.lcsc.com/datasheet/lcsc_datasheet_AiP1640_C82650.pdf)
 - [moOde audio player](https://moodeaudio.org/)
 - [CAVA (Console-based Audio Visualizer for ALSA)](https://github.com/karlstav/cava)
 - [MPD (Music Player Daemon)](https://www.musicpd.org/)
