@@ -1,105 +1,108 @@
-# 8x16 LED Matrix Audio Spectrum Visualizer with AiP1640 for moOde
+# 8x16 LED Matrix Audio Spectrum Visualizer for moOde
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Features](#features)
+3. [Hardware Requirements](#hardware-requirements)
+4. [Software Requirements](#software-requirements)
+5. [Installation](#installation)
+6. [Usage](#usage)
+7. [Configuration](#configuration)
+8. [Troubleshooting](#troubleshooting)
+9. [Contributing](#contributing)
+10. [License](#license)
+11. [Acknowledgments](#acknowledgments)
+12. [Version and Compatibility](#version-and-compatibility)
 
 ## Overview
 
-This implementation creates an audio visualizer using an 8x16 LED matrix display, controlled by the AiP1640 chip, intended as a companion project for use with the moOde audio player on a Raspberry Pi. It captures audio output from ALSA (Advanced Linux Sound Architecture), processes it with CAVA (Console-based Audio Visualizer for ALSA), and displays a real-time visualization on the LED matrix.
+This project implements an audio spectrum visualizer using an 8x16 LED matrix display controlled by the AiP1640 chip. Designed as a companion for the moOde audio player on a Raspberry Pi, it captures audio output from ALSA (Advanced Linux Sound Architecture), processes it with CAVA (Console-based Audio Visualizer for ALSA), and displays a real-time visualization on the LED matrix.
 
-The primary motivation behind this implementation was to create a tangible audio visualizer for music streamers the use USB Audio output. As a benefit, this approach ensures that the analog audio signal remains completely unaffected, while still offering an engaging visual representation of the music.
+The primary motivation behind this implementation is to create a tangible audio visualizer for SBC music streamers that use USB Audio as output. This approach ensures that the analog audio signal remains unaffected while offering an engaging visual representation of the music.
 
-This project offers a Python driver for the AiP1640 LED driver chip and a control script, making it easier for DIY tinkerers and sound aficionados to work with this cheap and fun LED matrix display module.
+This project provides a Python driver for the AiP1640 LED driver chip and a control script, making it easier for DIY enthusiasts and audio aficionados to work with this affordable and fun LED matrix display module.
 
 ## Features
 
-- Utilizes an 8x16 LED matrix display with AiP1640 chip controller
-- Real-time processing of audio from moOde audio player
-- Seamless CAVA start and stop processes
-- Adjustable display brightness
+- Real-time audio spectrum visualization on an 8x16 LED matrix display
+- AiP1640 chip controller support
+- Seamless integration with moOde audio player
+- Non-intrusive audio capture using ALSA loopback
+- Automatic CAVA process management
+- Adjustable display brightness (8 levels)
+
 
 ## Hardware Requirements
 
-- Raspberry Pi running moOde audio player
+- Raspberry Pi
 - 8x16 LED matrix display based on AiP1640 chip
-- Appropriate connections between Raspberry Pi and LED matrix
+- Jumper wires for connecting Raspberry Pi to LED matrix
 
 ## Software Requirements
 
-- moOde audio player
-- CAVA (Console-based Audio Visualizer for ALSA)
+- moOde audio player (tested with version 9.0.6)
+- CAVA (tested with version 0.10.2)
+- Python 3+
 
 ## Installation
 
-1. Install the Python scripts:
+1. **Set up moOde audio player**:
+   Follow the official moOde installation guide at [moodeaudio.org](https://moodeaudio.org/).
 
-   There are two ways to set up this visualizer:
-
-   - Clone this repository:
-     ```
-     git clone https://github.com/yourusername/8x16-led-audio-visualizer.git
-     cd 8x16-led-audio-visualizer
-     ```
-
-   - Direct script copy (quickest method):
-     Given the simplicity of the project, you can also just copy the two essential Python scripts:
-     - `aip1640_driver.py`: The driver script for the AIP1640 LED controller
-     - `visu.py`: The main controller script for the visualizer
-
-     You can create these two files in your preferred directory and copy the code directly into them.
-
-2. Install CAVA:
-   
-   On Raspberry Pi, you can install CAVA very easily:
-   ```
+2. **Install CAVA**:
+   ```bash
    sudo apt update
    sudo apt install cava
    ```
 
-   If you prefer to install from source or are using a different system, follow these steps:
-   ```
-   sudo apt install libfftw3-dev libasound2-dev libncursesw5-dev libpulse-dev libtool automake
-   git clone https://github.com/karlstav/cava.git
-   cd cava
-   ./autogen.sh
-   ./configure
-   make
-   sudo make install
+3. **Clone the repository**:
+   ```bash
+   git clone https://github.com/yourusername/8x16-led-audio-visualizer.git
+   cd 8x16-led-audio-visualizer
    ```
 
-3. Configure ALSA loopback in moOde:
-   - Go to moOde interface
+4. **Configure ALSA loopback in moOde**:
+   - Open the moOde web interface
    - Navigate to Configure -> Audio
    - Under "ALSA Options", set Loopback to "on"
+   - Save and reboot your Raspberry Pi
 
 ## Usage
 
-Run the visualizer with the built-in CAVA configuration:
+1. Connect your LED matrix to the Raspberry Pi GPIO pins as specified in the `visu.py` script.
 
-```
-python3 visu.py
-```
+2. Run the visualizer:
+   ```bash
+   sudo python3 visu.py
+   ```
+
+3. Play music through moOde, and watch the LED matrix come to life!
 
 ## Configuration
 
-Edit `visu.py` to change GPIO pins or other settings:
+Edit `visu.py` to customize the visualizer:
 
 ```python
-CLOCK_PIN = 3
-DATA_PIN = 2
-DEFAULT_BRIGHTNESS = 0
+CLOCK_PIN = 3  # GPIO pin for clock
+DATA_PIN = 2   # GPIO pin for data
+DEFAULT_BRIGHTNESS = 0  # Initial brightness (0-7)
 ```
 
-The CAVA configuration for the display is already included in the `visu.py` script.
+You can also modify the CAVA configuration within the `create_cava_config()` function in `visu.py` to adjust the audio processing parameters.
+
+## Troubleshooting
+
+- **No display**: Ensure the LED matrix is correctly connected and the GPIO pins are properly configured.
+- **No visualization**: Check if ALSA loopback is enabled in moOde and CAVA is installed correctly.
+- **Permission errors**: Make sure to run the script with `sudo`.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-As the creator of this project, I want to clarify that I'm a beginner and hobbyist, not a professional at this. I'm an enthusiastic music lover who discovered in Linux audio a way to combine my passion for music with learning new stuff. My code is primarily aimed at my personal DIY music streamer projects using Raspberry Pi and microcontrollers. 
-
-If you're also a hobbyist or enthusiast in this area, don't hesitate to contribute or suggest improvements. This is all about learning and enjoying the process!
+Contributions are welcome! Please feel free to contribute or suggest improvements. This is all about learning and enjoying the process!
 
 ## License
 
-This project is released under the GNU General Public License v3.0. If you distribute this software or any derivative works, you must do so under the same license (GPL-3.0).
+This project is released under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
@@ -111,8 +114,8 @@ This project is released under the GNU General Public License v3.0. If you distr
 
 ## Version and Compatibility
 
-Current version: 0.1
-
-This project has been tested with:
-- moOde audio player version 9.0.6
-- CAVA version 0.10.2
+- Current version: 0.1
+- Tested with:
+  - moOde audio player version 9.0.6
+  - CAVA version 0.10.2
+  - Raspberry Pi 4 Model B (but should work with other models)
