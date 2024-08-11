@@ -1,4 +1,4 @@
-# 8x16 LED Matrix Audio Visualizer with AiP1640 for moOde
+# 8x16 LED Matrix Audio Spectrum Visualizer with AiP1640 for moOde
 
 ## Overview
 
