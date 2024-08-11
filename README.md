@@ -1,19 +1,5 @@
 # 8x16 LED Matrix Audio Spectrum Visualizer for moOde
 
-## Table of Contents
-1. [Overview](#overview)
-2. [Features](#features)
-3. [Hardware Requirements](#hardware-requirements)
-4. [Software Requirements](#software-requirements)
-5. [Installation](#installation)
-6. [Usage](#usage)
-7. [Configuration](#configuration)
-8. [Troubleshooting](#troubleshooting)
-9. [Contributing](#contributing)
-10. [License](#license)
-11. [Acknowledgments](#acknowledgments)
-12. [Version and Compatibility](#version-and-compatibility)
-
 ## Overview
 
 This project implements an audio spectrum visualizer using an 8x16 LED matrix display controlled by the AiP1640 chip. Designed as a companion for the moOde audio player on a Raspberry Pi, it captures audio output from ALSA (Advanced Linux Sound Architecture), processes it with CAVA (Console-based Audio Visualizer for ALSA), and displays a real-time visualization on the LED matrix.
