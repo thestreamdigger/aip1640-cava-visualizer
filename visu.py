@@ -2,109 +2,120 @@ import time
 import os
 import fcntl
 import subprocess
-import signal
-from threading import Thread, Event
+from threading import Thread, Event, Lock
+from mpd import MPDClient, ConnectionError
 from aip1640_driver import AIP1640
-
-__version__ = '0.1'
+from bitmaps import char_bitmaps
 
 CLOCK_PIN = 3
 DATA_PIN = 2
-SLEEP_TIME = 0.005
-DEFAULT_BRIGHTNESS = 0
+MPD_HOST = "localhost"
+MPD_PORT = 6600
+DISPLAY_LENGTH = 16
+SCROLL_COLUMNS_PER_SECOND_PAUSE = 24
+SCROLL_COLUMNS_PER_SECOND_INTRO = 24
 CAVA_OUTPUT_PATH = '/tmp/cava_output.raw'
 CAVA_CONFIG_PATH = '/tmp/cava_config'
+CAVA_FRAMERATE = 48
+CAVA_UPDATE_INTERVAL = 1 / CAVA_FRAMERATE
 
-class LEDDisplay:
-    def __init__(self, clk_pin=CLOCK_PIN, dio_pin=DATA_PIN, brightness=DEFAULT_BRIGHTNESS):
-        self.display = AIP1640(clk_pin=clk_pin, dio_pin=dio_pin, brightness=brightness)
-        self.images = {}
-        self.current_image_name = "initial"
+BRIGHTNESS_PLAY = 2
+BRIGHTNESS_PAUSE = 0
+BRIGHTNESS_STOP = 0
+
+SCROLL_INTRO_ENABLED = True
+
+class IntegratedLEDDisplay:
+    def __init__(self):
+        self.display = AIP1640(clk_pin=CLOCK_PIN, dio_pin=DATA_PIN)
+        self.display.set_brightness(BRIGHTNESS_STOP)
+        self.mpd_client = None
         self.stop_event = Event()
-        self.update_event = Event()
-        self.bitmap = [0] * 16
+        self.cava_data = [0] * DISPLAY_LENGTH
+        self.cava_lock = Lock()
+        self.current_state = "stop"
+        self.bitmap_cache = {}
         self.cava_process = None
+        self.scroll_position = 0
+        self.display_buffer = []
+        self.text = ""
+        self.last_scroll_time = 0
+        self.scroll_interval_pause = 1 / SCROLL_COLUMNS_PER_SECOND_PAUSE
+        self.scroll_interval_intro = 1 / SCROLL_COLUMNS_PER_SECOND_INTRO
+        self.current_song = ""
+        self.new_song_intro = False
+        self.intro_complete = False
 
-    def set_brightness(self, brightness):
+    def connect_to_mpd(self):
+        self.mpd_client = MPDClient()
         try:
-            self.display.set_brightness(brightness)
-        except ValueError:
-            pass
+            self.mpd_client.connect(MPD_HOST, MPD_PORT)
+        except ConnectionError:
+            print("Failed to connect to MPD")
+            self.mpd_client = None
 
-    def add_image(self, name, data):
-        self.images[name] = data
-
-    def remove_image(self, name):
-        self.images.pop(name, None)
-
-    def update_display(self):
-        while not self.stop_event.is_set():
-            self.update_event.wait()
+    def get_mpd_song_info(self):
+        if not self.mpd_client:
+            self.connect_to_mpd()
+        if self.mpd_client:
             try:
-                self.display.write(self.bitmap)
-            except Exception:
-                pass
-            self.update_event.clear()
+                song = self.mpd_client.currentsong()
+                status = self.mpd_client.status()
+                self.current_state = status['state']
+                track = song.get('track', '')
+                artist = song.get('artist', '')
+                title = song.get('title', '')
+                parts = [p for p in [track, artist, title] if p]
+                return " - ".join(parts)
+            except ConnectionError:
+                print("Lost connection to MPD")
+                self.mpd_client = None
+        return "No MPD Connection"
 
-    def read_cava_output(self, file_path):
-        with open(file_path, 'r') as file:
-            fd = file.fileno()
-            fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-            buffer = ""
-            while not self.stop_event.is_set():
-                try:
-                    part = file.read()
-                    if part:
-                        buffer += part
-                        if '\n' not in buffer:
-                            time.sleep(SLEEP_TIME)
-                            continue
-                        lines = buffer.split('\n')
-                        buffer = lines[-1]
-                        for line in lines[:-1]:
-                            values = line.strip().split(';')
-                            filtered_values = [value for value in values if value]
-                            if len(filtered_values) == 16:
-                                left_data = [int(value) for value in filtered_values[:8]]
-                                right_data = [int(value) for value in filtered_values[8:]]
-                                self.bitmap = self.transform_to_bitmap(left_data, right_data)
-                                self.update_event.set()
-                except IOError:
-                    time.sleep(SLEEP_TIME)
-                except TypeError:
-                    buffer = ""
-                    time.sleep(SLEEP_TIME)
+    def rotate_bitmap(self, bitmap):
+        new_bitmap = [0] * 8
+        for i in range(8):
+            for j in range(8):
+                if bitmap[j] & (1 << i):
+                    new_bitmap[7-i] |= (1 << j)
+        return new_bitmap
 
-    @staticmethod
-    def transform_to_bitmap(left_data, right_data):
-        def reverse_bits(byte):
-            return int(f'{byte:08b}'[::-1], 2)
+    def get_rotated_bitmap(self, char):
+        if char not in self.bitmap_cache:
+            char_bitmap = char_bitmaps.get(char, char_bitmaps[' '])
+            rotated_bitmap = self.rotate_bitmap(char_bitmap)
+            self.bitmap_cache[char] = rotated_bitmap
+        return self.bitmap_cache[char]
 
-        def create_column(value):
-            column = sum(1 << i for i in range(value))
-            return reverse_bits(column)
-
-        left_bitmap = [create_column(value) for value in left_data]
-        right_bitmap = [create_column(value) for value in right_data]
-
-        left_rotated = [
-            sum((1 << (7 - j)) for j in range(8) if left_bitmap[j] & (1 << i))
-            for i in range(8)
-        ]
-
-        right_rotated = [
-            sum((1 << j) for j in range(8) if right_bitmap[j] & (1 << (7 - i)))
-            for i in range(8)
-        ]
-
-        return left_rotated + right_rotated
+    def scroll_text(self):
+        current_time = time.time()
+        scroll_interval = self.scroll_interval_intro if self.new_song_intro else self.scroll_interval_pause
+        
+        if current_time - self.last_scroll_time < scroll_interval:
+            return self.display_buffer[self.scroll_position:self.scroll_position + DISPLAY_LENGTH]
+        
+        self.last_scroll_time = current_time
+        if self.scroll_position == 0:
+            self.display_buffer = []
+            for char in self.text.upper():
+                self.display_buffer.extend(self.get_rotated_bitmap(char))
+                self.display_buffer.extend([0x00])
+            self.display_buffer.extend([0x00] * DISPLAY_LENGTH)
+        
+        result = self.display_buffer[self.scroll_position:self.scroll_position + DISPLAY_LENGTH]
+        self.scroll_position = (self.scroll_position + 1) % len(self.display_buffer)
+        
+        if self.scroll_position == 0 and self.new_song_intro:
+            self.intro_complete = True
+            self.new_song_intro = False
+        
+        return result
 
     def create_cava_config(self):
-        config = """
+        config = f"""
 [general]
-bars = 16
-framerate = 30
+bars = {DISPLAY_LENGTH}
+framerate = {CAVA_FRAMERATE}
 
 [input]
 method = alsa
@@ -113,15 +124,15 @@ channels = stereo
 
 [output]
 method = raw
-raw_target = /tmp/cava_output.raw
+raw_target = {CAVA_OUTPUT_PATH}
 data_format = ascii
 ascii_max_range = 8
 
 [smoothing]
-integral = 25
+integral = 36
 monstercat = 1
 waves = 0
-gravity = 300
+gravity = 420
 ignore = 0
 
 [eq]
@@ -139,39 +150,125 @@ ignore = 0
 
     def start_cava(self):
         self.create_cava_config()
-        self.cava_process = subprocess.Popen(['sudo', 'cava', '-p', CAVA_CONFIG_PATH], 
-                                             stdout=subprocess.DEVNULL, 
-                                             stderr=subprocess.DEVNULL)
-
-    def stop_cava(self):
-        if self.cava_process:
-            subprocess.run(['sudo', 'kill', '-SIGINT', str(self.cava_process.pid)])
-            self.cava_process.wait()
-
-    def run(self, cava_output_path=CAVA_OUTPUT_PATH):
-        def signal_handler(signum, frame):
+        try:
+            self.cava_process = subprocess.Popen(['cava', '-p', CAVA_CONFIG_PATH], 
+                                                 stdout=subprocess.DEVNULL, 
+                                                 stderr=subprocess.DEVNULL)
+            start_time = time.time()
+            while not os.path.exists(CAVA_OUTPUT_PATH):
+                if time.time() - start_time > 10:
+                    raise TimeoutError("CAVA output file not created within timeout period")
+                time.sleep(0.1)
+        except Exception as e:
+            print(f"Error starting CAVA: {e}")
             self.stop_event.set()
-            self.update_event.set()
 
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+    def read_cava_output(self):
+        while not self.stop_event.is_set():
+            try:
+                with open(CAVA_OUTPUT_PATH, 'rb', buffering=0) as file:
+                    fd = file.fileno()
+                    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+                    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+                    while not self.stop_event.is_set():
+                        try:
+                            line = file.readline().decode().strip()
+                            if line:
+                                values = [int(v) for v in line.split(';') if v]
+                                if len(values) == DISPLAY_LENGTH:
+                                    with self.cava_lock:
+                                        self.cava_data = values
+                        except (IOError, OSError):
+                            time.sleep(0.001)
+            except FileNotFoundError:
+                print("CAVA output file not found. Retrying...")
+                time.sleep(1)
+
+    def transform_to_bitmap(self, data):
+        def reverse_bits(byte):
+            return int(f'{byte:08b}'[::-1], 2)
+        def create_column(value):
+            column = sum(1 << i for i in range(value))
+            return reverse_bits(column)
+        left_bitmap = [create_column(value) for value in data[:8]]
+        right_bitmap = [create_column(value) for value in data[8:]]
+        left_rotated = [
+            sum((1 << (7 - j)) for j in range(8) if left_bitmap[j] & (1 << i))
+            for i in range(8)
+        ]
+        right_rotated = [
+            sum((1 << j) for j in range(8) if right_bitmap[j] & (1 << (7 - i)))
+            for i in range(8)
+        ]
+        return left_rotated + right_rotated
+
+    def update_display(self):
+        if self.current_state == 'play':
+            if SCROLL_INTRO_ENABLED and self.new_song_intro and not self.intro_complete:
+                self.display.set_brightness(BRIGHTNESS_PLAY)
+                self.display.write(self.scroll_text())
+            else:
+                self.display.set_brightness(BRIGHTNESS_PLAY)
+                with self.cava_lock:
+                    bitmap = self.transform_to_bitmap(self.cava_data)
+                self.display.write(bitmap)
+        elif self.current_state == 'pause':
+            self.display.set_brightness(BRIGHTNESS_PAUSE)
+            self.display.write(self.scroll_text())
+        else:
+            self.display.set_brightness(BRIGHTNESS_STOP)
+            self.display.write([0] * DISPLAY_LENGTH)
+
+    def check_mpd_state(self):
+        if not self.mpd_client:
+            self.connect_to_mpd()
+        if self.mpd_client:
+            try:
+                status = self.mpd_client.status()
+                new_state = status['state']
+                new_song = self.get_mpd_song_info()
+                if new_song != self.current_song:
+                    self.current_song = new_song
+                    self.text = new_song
+                    self.scroll_position = 0
+                    self.last_scroll_time = 0
+                    if SCROLL_INTRO_ENABLED:
+                        self.new_song_intro = True
+                        self.intro_complete = False
+                if new_state != self.current_state:
+                    self.current_state = new_state
+                    if new_state == 'pause':
+                        self.text = new_song
+                        self.scroll_position = 0
+                        self.last_scroll_time = 0
+            except ConnectionError:
+                print("Lost connection to MPD")
+                self.mpd_client = None
+
+    def run(self):
+        self.start_cava()
+        cava_thread = Thread(target=self.read_cava_output)
+        cava_thread.start()
 
         try:
-            self.start_cava()
-            time.sleep(2)
-            reader_thread = Thread(target=self.read_cava_output, args=(cava_output_path,))
-            updater_thread = Thread(target=self.update_display)
-            reader_thread.start()
-            updater_thread.start()
-
+            last_update_time = time.time()
             while not self.stop_event.is_set():
-                time.sleep(0.1)
-
-            reader_thread.join()
-            updater_thread.join()
+                current_time = time.time()
+                if current_time - last_update_time >= CAVA_UPDATE_INTERVAL:
+                    self.check_mpd_state()
+                    self.update_display()
+                    last_update_time = current_time
+                time.sleep(0.001)
+        except KeyboardInterrupt:
+            print("Keyboard interrupt received. Stopping...")
         finally:
-            self.stop_cava()
+            self.stop_event.set()
+            if self.cava_process:
+                self.cava_process.terminate()
+            if self.mpd_client:
+                self.mpd_client.disconnect()
+            print("Cleanup complete. Exiting.")
 
 if __name__ == '__main__':
-    display = LEDDisplay()
+    display = IntegratedLEDDisplay()
     display.run()

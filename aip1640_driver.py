@@ -1,7 +1,7 @@
 from gpiozero import LEDBoard
 from time import sleep
 
-__version__ = '0.1'
+__version__ = '0.2'
 
 DATA_COMMAND = 0x40
 ADDRESS_COMMAND = 0xC0
