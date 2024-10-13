@@ -1,98 +1,88 @@
 from gpiozero import LEDBoard
 from time import sleep
 
-__version__ = '0.3'
-
-DATA_COMMAND = 0x40
-ADDRESS_COMMAND = 0xC0
-DISPLAY_CONTROL_COMMAND = 0x80
-DISPLAY_ON = 0x08
-DELAY = 0.000001
-
-BRIGHTNESS_MAX = 7
-DISPLAY_MAX_POS = 15
-DISPLAY_MAX_ROWS = 16
-
 class AIP1640:
+    DATA_COMMAND = 0x40
+    FIXED_ADDRESS = 0x44
+    ADDRESS_COMMAND = 0xC0
+    DISPLAY_COMMAND = 0x80
+    DISPLAY_ON = 0x08
+    
+    MAX_BRIGHTNESS = 7
+    MAX_POSITION = 15
+    MAX_ROWS = 16
+
     def __init__(self, clk_pin, dio_pin, brightness=5):
         self.pins = LEDBoard(clk=clk_pin, dio=dio_pin, pwm=False)
-        self._validate_brightness(brightness)
-        self.brightness = brightness
+        self.set_brightness(brightness)
         self._initialize_display()
 
     def _initialize_display(self):
-        self._send_data_command()
+        self._send_command(self.DATA_COMMAND)
         self._set_display_control()
 
-    def _start_communication(self):
+    def _send_command(self, command):
+        self._start_transmission()
+        self._write_byte(command)
+        self._stop_transmission()
+
+    def _start_transmission(self):
+        self.pins.dio.on()
+        self.pins.clk.on()
         self.pins.dio.off()
         self.pins.clk.off()
-        sleep(DELAY)
 
-    def _stop_communication(self):
+    def _stop_transmission(self):
+        self.pins.clk.off()
         self.pins.dio.off()
         self.pins.clk.on()
         self.pins.dio.on()
-        sleep(DELAY)
-
-    def _send_data_command(self):
-        self._start_communication()
-        self._write_byte(DATA_COMMAND)
-        self._stop_communication()
-
-    def _set_display_control(self):
-        self._start_communication()
-        control_command = DISPLAY_CONTROL_COMMAND | DISPLAY_ON | self.brightness
-        self._write_byte(control_command)
-        self._stop_communication()
 
     def _write_byte(self, byte):
-        for i in range(8):
-            self.pins.dio.value = (byte >> i) & 1
-            self.pins.clk.on()
+        for _ in range(8):
             self.pins.clk.off()
-        sleep(DELAY)
+            self.pins.dio.value = byte & 1
+            byte >>= 1
+            self.pins.clk.on()
 
-    def _validate_brightness(self, brightness):
-        if not 0 <= brightness <= BRIGHTNESS_MAX:
-            raise ValueError(f"Brightness out of range (0-{BRIGHTNESS_MAX})")
+    def _set_display_control(self):
+        self._send_command(self.DISPLAY_COMMAND | self.DISPLAY_ON | self.brightness)
 
-    def set_brightness(self, brightness=None):
-        if brightness is None:
-            return self.brightness
-        self._validate_brightness(brightness)
-        self.brightness = brightness
+    def set_brightness(self, brightness):
+        if 0 <= brightness <= self.MAX_BRIGHTNESS:
+            self.brightness = brightness
+            self._set_display_control()
+        else:
+            raise ValueError(f"Brightness must be between 0 and {self.MAX_BRIGHTNESS}")
+
+    def write(self, data, pos=0):
+        if not 0 <= pos <= self.MAX_POSITION:
+            raise ValueError(f"Position must be between 0 and {self.MAX_POSITION}")
+        if len(data) > self.MAX_ROWS:
+            raise ValueError(f"Data length exceeds maximum rows ({self.MAX_ROWS})")
+
+        self._send_command(self.FIXED_ADDRESS)
+        self._start_transmission()
+        self._write_byte(self.ADDRESS_COMMAND | pos)
+        for byte in data:
+            self._write_byte(byte)
+        self._stop_transmission()
         self._set_display_control()
-        return self.brightness
 
-    def write(self, rows, pos=0):
-        if not 0 <= pos <= DISPLAY_MAX_POS:
-            raise ValueError(f"Position out of range (0-{DISPLAY_MAX_POS})")
-        if len(rows) > DISPLAY_MAX_ROWS:
-            raise ValueError(f'Number of rows exceeds the maximum for the display (max {DISPLAY_MAX_ROWS})')
-
-        self._send_data_command()
-        self._start_communication()
-        self._write_byte(ADDRESS_COMMAND | pos)
-        for row in rows:
-            self._write_byte(row)
-        self._stop_communication()
-        self._set_display_control()
+    def clear(self):
+        self.write([0] * self.MAX_ROWS)
 
     def write_int(self, value, pos=0, length=8):
-        value_bytes = value.to_bytes(length, 'big')
-        self.write(value_bytes, pos)
+        data = value.to_bytes(length, 'big')
+        self.write(data, pos)
 
-    def write_high_to_low(self, buf, pos=0):
-        if not 0 <= pos <= DISPLAY_MAX_POS:
-            raise ValueError(f"Position out of range (0-{DISPLAY_MAX_POS})")
-        if len(buf) > DISPLAY_MAX_ROWS:
-            raise ValueError(f'Number of lines in buffer exceeds the maximum (max {DISPLAY_MAX_ROWS})')
+    def write_string(self, string, char_map, pos=0):
+        data = [char_map.get(c, 0x00) for c in string[:self.MAX_ROWS]]
+        self.write(data, pos)
 
-        self._send_data_command()
-        self._start_communication()
-        self._write_byte(ADDRESS_COMMAND | pos)
-        for i in range(len(buf) - 1, -1, -1):
-            self._write_byte(buf[i])
-        self._stop_communication()
-        self._set_display_control()
+    def __del__(self):
+        try:
+            self.clear()
+            self.pins.close()
+        except:
+            pass

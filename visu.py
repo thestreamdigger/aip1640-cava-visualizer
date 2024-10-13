@@ -13,7 +13,7 @@ MPD_HOST = "localhost"
 MPD_PORT = 6600
 DISPLAY_LENGTH = 16
 SCROLL_COLUMNS_PER_SECOND_PAUSE = 24
-SCROLL_COLUMNS_PER_SECOND_INTRO = 24
+SCROLL_COLUMNS_PER_SECOND_INTRO = 48
 CAVA_OUTPUT_PATH = '/tmp/cava_output.raw'
 CAVA_CONFIG_PATH = '/tmp/cava_config'
 CAVA_FRAMERATE = 48
@@ -27,8 +27,13 @@ SCROLL_INTRO_ENABLED = True
 
 class IntegratedLEDDisplay:
     def __init__(self):
-        self.display = AIP1640(clk_pin=CLOCK_PIN, dio_pin=DATA_PIN)
-        self.display.set_brightness(BRIGHTNESS_STOP)
+        try:
+            self.display = AIP1640(clk_pin=CLOCK_PIN, dio_pin=DATA_PIN)
+            self.display.set_brightness(BRIGHTNESS_STOP)
+            self.display.clear()
+        except Exception as e:
+            print(f"Error initializing display: {e}")
+            self.stop_event.set()
         self.mpd_client = None
         self.stop_event = Event()
         self.cava_data = [0] * DISPLAY_LENGTH
@@ -203,21 +208,24 @@ ignore = 0
         return left_rotated + right_rotated
 
     def update_display(self):
-        if self.current_state == 'play':
-            if SCROLL_INTRO_ENABLED and self.new_song_intro and not self.intro_complete:
-                self.display.set_brightness(BRIGHTNESS_PLAY)
+        try:
+            if self.current_state == 'play':
+                if SCROLL_INTRO_ENABLED and self.new_song_intro and not self.intro_complete:
+                    self.display.set_brightness(BRIGHTNESS_PLAY)
+                    self.display.write(self.scroll_text())
+                else:
+                    self.display.set_brightness(BRIGHTNESS_PLAY)
+                    with self.cava_lock:
+                        bitmap = self.transform_to_bitmap(self.cava_data)
+                    self.display.write(bitmap)
+            elif self.current_state == 'pause':
+                self.display.set_brightness(BRIGHTNESS_PAUSE)
                 self.display.write(self.scroll_text())
             else:
-                self.display.set_brightness(BRIGHTNESS_PLAY)
-                with self.cava_lock:
-                    bitmap = self.transform_to_bitmap(self.cava_data)
-                self.display.write(bitmap)
-        elif self.current_state == 'pause':
-            self.display.set_brightness(BRIGHTNESS_PAUSE)
-            self.display.write(self.scroll_text())
-        else:
-            self.display.set_brightness(BRIGHTNESS_STOP)
-            self.display.write([0] * DISPLAY_LENGTH)
+                self.display.set_brightness(BRIGHTNESS_STOP)
+                self.display.clear()
+        except Exception as e:
+            print(f"Error updating display: {e}")
 
     def check_mpd_state(self):
         if not self.mpd_client:
