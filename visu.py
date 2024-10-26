@@ -1,6 +1,4 @@
 import time
-import os
-import fcntl
 import subprocess
 from threading import Thread, Event, Lock
 from mpd import MPDClient, ConnectionError
@@ -14,8 +12,6 @@ MPD_PORT = 6600
 DISPLAY_LENGTH = 16
 SCROLL_COLUMNS_PER_SECOND_PAUSE = 24
 SCROLL_COLUMNS_PER_SECOND_INTRO = 36
-CAVA_OUTPUT_PATH = '/tmp/cava_output.raw'
-CAVA_CONFIG_PATH = '/tmp/cava_config'
 CAVA_FRAMERATE = 48
 CAVA_UPDATE_INTERVAL = 1 / CAVA_FRAMERATE
 
@@ -129,7 +125,7 @@ channels = stereo
 
 [output]
 method = raw
-raw_target = {CAVA_OUTPUT_PATH}
+raw_target = /dev/stdout
 data_format = ascii
 ascii_max_range = 8
 
@@ -150,20 +146,21 @@ ignore = 0
 7 = 1
 8 = 1
 """
-        with open(CAVA_CONFIG_PATH, 'w') as f:
+        config_path = "/tmp/cava_config"
+        with open(config_path, 'w') as f:
             f.write(config)
+        return config_path
 
     def start_cava(self):
-        self.create_cava_config()
+        config_path = self.create_cava_config()
         try:
-            self.cava_process = subprocess.Popen(['cava', '-p', CAVA_CONFIG_PATH], 
-                                                 stdout=subprocess.DEVNULL, 
-                                                 stderr=subprocess.DEVNULL)
-            start_time = time.time()
-            while not os.path.exists(CAVA_OUTPUT_PATH):
-                if time.time() - start_time > 10:
-                    raise TimeoutError("CAVA output file not created within timeout period")
-                time.sleep(0.1)
+            self.cava_process = subprocess.Popen(
+                ['cava', '-p', config_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1,
+                universal_newlines=True
+            )
         except Exception as e:
             print(f"Error starting CAVA: {e}")
             self.stop_event.set()
@@ -171,23 +168,14 @@ ignore = 0
     def read_cava_output(self):
         while not self.stop_event.is_set():
             try:
-                with open(CAVA_OUTPUT_PATH, 'rb', buffering=0) as file:
-                    fd = file.fileno()
-                    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-                    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-                    while not self.stop_event.is_set():
-                        try:
-                            line = file.readline().decode().strip()
-                            if line:
-                                values = [int(v) for v in line.split(';') if v]
-                                if len(values) == DISPLAY_LENGTH:
-                                    with self.cava_lock:
-                                        self.cava_data = values
-                        except (IOError, OSError):
-                            time.sleep(0.001)
-            except FileNotFoundError:
-                print("CAVA output file not found. Retrying...")
-                time.sleep(1)
+                line = self.cava_process.stdout.readline().strip()
+                if line:
+                    values = [int(v) for v in line.split(';') if v]
+                    if len(values) == DISPLAY_LENGTH:
+                        with self.cava_lock:
+                            self.cava_data = values
+            except Exception:
+                time.sleep(0.001)
 
     def transform_to_bitmap(self, data):
         def reverse_bits(byte):
@@ -275,6 +263,8 @@ ignore = 0
                 self.cava_process.terminate()
             if self.mpd_client:
                 self.mpd_client.disconnect()
+            if os.path.exists("/tmp/cava_config"):
+                os.remove("/tmp/cava_config")
             print("Cleanup complete. Exiting.")
 
 if __name__ == '__main__':
