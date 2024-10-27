@@ -180,11 +180,17 @@ ignore = 0
     def transform_to_bitmap(self, data):
         def reverse_bits(byte):
             return int(f'{byte:08b}'[::-1], 2)
+        
         def create_column(value):
             column = sum(1 << i for i in range(value))
             return reverse_bits(column)
-        left_bitmap = [create_column(value) for value in data[:8]]
-        right_bitmap = [create_column(value) for value in data[8:]]
+        
+        right_data = data[:8]
+        left_data = data[8:]
+        
+        left_bitmap = [create_column(value) for value in left_data]
+        right_bitmap = [create_column(value) for value in right_data]
+        
         left_rotated = [
             sum((1 << (7 - j)) for j in range(8) if left_bitmap[j] & (1 << i))
             for i in range(8)
@@ -193,6 +199,7 @@ ignore = 0
             sum((1 << j) for j in range(8) if right_bitmap[j] & (1 << (7 - i)))
             for i in range(8)
         ]
+        
         return left_rotated + right_rotated
 
     def update_display(self):
